@@ -1,11 +1,11 @@
 import h5py
 import numpy as np
-from tqdm import trange
 import os
+from tqdm import trange
 from utils import create_mask
 
 class MatrixParser:
-    def __init__(self, impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, res, cytoband_path, embedding_name="exp1"):
+    def __init__(self, impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, res, cytoband_path, embedding_name="exp1", process_cnt=1):
         self.impute_dir = impute_dir
         self.raw_dir = raw_dir
         self.chrom_list = chrom_list
@@ -15,9 +15,15 @@ class MatrixParser:
         self.res = res
         self.cytoband_path = cytoband_path
         self.embedding_name = embedding_name
+        self.process_cnt = process_cnt
 
     def __iter__(self):
-        for idx in trange(len(self.chrom_list)):
+        if self.process_cnt == 1:
+            range_iter = trange(len(self.chrom_list), desc="Processing Chromosomes")
+        else:
+            range_iter = range(len(self.chrom_list))
+
+        for idx in range_iter:
             chrom = self.chrom_list[idx].decode('utf-8')
             origin_sparse = np.load(os.path.join(self.raw_dir, f"chr{chrom}_sparse_adj.npy"), allow_pickle=True)
             size = origin_sparse[0].shape[0]
