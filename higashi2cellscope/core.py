@@ -7,14 +7,10 @@ import pickle
 from sklearn.decomposition import PCA
 from umap import UMAP
 from collections import defaultdict
-from utils import rlencode, fileType, copyDataset
+from utils import rlencode, fileType, copyDataset, merge_temp_h5_files, print_hdf5_structure
 from matrixParser import MatrixParser
 import multiprocessing as mp
-import tables as pt
-
-# Constants
-sentinel = None
-
+import tqdm
 CHROM_DTYPE = np.dtype("S")
 CHROMID_DTYPE = np.int32
 CHROMSIZE_DTYPE = np.int32
@@ -25,9 +21,10 @@ OFFSET_DTYPE = np.int64
 
 """
 ├── meta
-├── embeddings
-│    ├── PCA
-│    └── UMAP
+│    ├── label
+├── embed
+│    ├── pca
+│    └── umap
 └── resolutions
      ├── 10000
      │   ├── bins
@@ -122,9 +119,9 @@ def setup_pixels(grp, nbins, h5_opts):
     grp.create_dataset("count", shape=(max_shape,),
                        dtype=COUNT_DTYPE, **h5_opts)
 
-def write_pixels(grp, impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, columns,res, cytoband_path, embedding_name):
+def write_pixels(grp, impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, columns,res, cytoband_path, embedding_name, process_cnt):
     cellMatrixParser = MatrixParser(
-         impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, res, cytoband_path, embedding_name)
+         impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, neighbors, res, cytoband_path, embedding_name, process_cnt)
     m_size = 0
     for chunk in cellMatrixParser:
         dsets = [grp[col] for col in columns]
@@ -181,8 +178,8 @@ def write_embed(grp, embed, h5_opts):
     grp.create_dataset("umap", shape=(len(vec_umap),2), data= vec_umap, **h5_opts)
     #grp.create_dataset("label", shape=(len(label),), data= label, **h5_opts)
 
-def write_meta(grp, data, h5_opts):
-    cell_type = np.array(data['cluster label'])
+def write_meta(grp, data, label_name, h5_opts):
+    cell_type = np.array(data[label_name])
     ascii_label = np.char.encode(cell_type, 'ascii')
     grp.create_dataset("label", shape=(len(ascii_label),), data= ascii_label, **h5_opts)
 
@@ -191,40 +188,28 @@ def write_track(source_dataset, cur_grp, track_type: str):
         del cur_grp[track_type]
     copyDataset(source_dataset, cur_grp, track_type)
 
-# Worker function to process each cell
-def process_cell(inqueue, output, cell_groups, contact_map_file, raw_map_file, np_chroms_names,
-                 chrom_offset, neighbor_num, res, cytoband_file, embedding_name, h5_opts, n_bins):
-    for i in iter(inqueue.get, sentinel):
-        output.put(('start_cell', i))
-        cur_cell_grp = cell_groups.create_group(f"cell_{i}")
-        
-        cell_grp_pixels = cur_cell_grp.create_group("pixels")
-        setup_pixels(cell_grp_pixels, n_bins, h5_opts)
-        
-        write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                     chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name)
-        
-        n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-        bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
-        
-        grp_index = cur_cell_grp.create_group("indexes")
-        write_index(grp_index, chrom_offset, bin_offset, h5_opts)
-        output.put(('end_cell', i))
+def process_cells_range(start, end, process_id, temp_folder, neighbor_num, cell_cnt, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
+        temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
+        with h5py.File(temp_h5_path, 'w') as hdf:
+            for i in range(start, end):
+                print(f"Process {process_id} processing cell {i}")
+                cur_cell_grp = hdf.create_group(f"cell_{i}")
+                cell_grp_pixels = cur_cell_grp.create_group("pixels")
+                setup_pixels(cell_grp_pixels, n_bins, h5_opts)
+                write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                            chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt)
+                n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
+                bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
+                grp_index = cur_cell_grp.create_group("indexes")
+                write_index(grp_index, chrom_offset, bin_offset, h5_opts)
 
-def handle_output(output, hdf_filename):
-    with pt.openFile(hdf_filename, mode='w') as hdf:
-        while True:
-            args = output.get()
-            if args:
-                method, args = args
-                if method == 'start_cell':
-                    print(f"Starting cell {args}")
-                elif method == 'end_cell':
-                    print(f"Ending cell {args}")
-                else:
-                    getattr(hdf, method)(*args)
-            else:
-                break
+                with progress.get_lock():
+                    progress.value += 1
+                    if progress.value % 10 == 0:  # Print progress every 10 cells
+                        print(f"Process {process_id} has completed {progress.value} cells")
+        #print(f"Process {process_id} finished processing cells {start} to {end-1}")
+
+
 
 class SCHiCGenerator:
     def __init__(self, config_path):
@@ -234,6 +219,7 @@ class SCHiCGenerator:
         self.raw_map_path = ""
         self.embed_file_name = ""
         self.meta_file_name = ""
+        self.embed_label = ""
         self.tracks = []
         self.neighbor_num = 0
         self.embedding_name = ""
@@ -242,6 +228,7 @@ class SCHiCGenerator:
         self.cell_cnt = 0
         self.resolutions = []
         self.h5_opts = {}
+        self.process_cnt = 0
         self.load_base_config(config_path)
     
     def load_base_config(self, config_path):
@@ -297,31 +284,59 @@ class SCHiCGenerator:
             n_chroms = len(res_grp["chroms"].get("length"))
             chrom_offset = get_bin_index(
                     res_grp["bins"], n_chroms, n_bins)
+        
+            if self.process_cnt == 1:
+                self.process_cells(cell_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file)
+        if self.process_cnt > 1:
+            self.parallel_process_cells(contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, n_bins)
+    
+    def parallel_process_cells(self, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, n_bins):
+        # Determine the range of cells each process should handle
+        cells_per_process = (self.cell_cnt + self.process_cnt - 1) // self.process_cnt
+        temp_folder = "temp_h5"
+        os.makedirs(temp_folder, exist_ok=True)
+        
+        # Create a shared progress counter
+        progress = mp.Value('i', 0)
+        
+        # Create a pool of worker processes
+        processes = []
+        for process_id in range(self.process_cnt):
+            start = process_id * cells_per_process
+            end = min((process_id + 1) * cells_per_process, self.cell_cnt)
+            if start < end:
+                p = mp.Process(target=process_cells_range, args=(start, end, process_id, temp_folder, self.neighbor_num, self.cell_cnt, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, self.embedding_name, self.h5_opts, n_bins, progress, self.process_cnt))
+                processes.append(p)
+                p.start()
 
-            self.parallel_process_cells(self.cell_cnt, cell_groups, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, self.neighbor_num, res, cytoband_file, self.embedding_name, self.h5_opts, n_bins)
+        # Wait for all processes to finish
+        for p in processes:
+            p.join()
+        # Merge the temporary HDF5 files into the original HDF5 file
+        merge_temp_h5_files(self.output_path, temp_folder, self.process_cnt, res)
+
+    def process_cells(self, cell_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file):
+        for i in range(self.cell_cnt):
+            print("cell "+str(i)+":")
+            cur_cell_grp = cell_groups.create_group(
+                "cell_"+str(i))
             
-            # for i in range(self.cell_cnt):
-            #     print("cell "+str(i)+":")
-            #     cur_cell_grp = cell_groups.create_group(
-            #         "cell_"+str(i))
-                
-            #     cell_grp_pixels = cur_cell_grp.create_group("pixels")
-            #     setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
-            #     write_pixels(cell_grp_pixels,  contact_map_file, raw_map_file, np_chroms_names,
-            #                  chrom_offset, i, self.neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name)
-            #     n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-            #     bin_offset = get_pixel_index(
-            #         cur_cell_grp["pixels"], n_bins, n_pixels)
-            #     grp_index = cur_cell_grp.create_group("indexes")
+            cell_grp_pixels = cur_cell_grp.create_group("pixels")
+            setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
+            write_pixels(cell_grp_pixels,  contact_map_file, raw_map_file, np_chroms_names,
+                            chrom_offset, i, self.neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt)
+            n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
+            bin_offset = get_pixel_index(
+                cur_cell_grp["pixels"], n_bins, n_pixels)
+            grp_index = cur_cell_grp.create_group("indexes")
 
-            #     write_index(grp_index, chrom_offset, bin_offset, self.h5_opts)
+            write_index(grp_index, chrom_offset, bin_offset, self.h5_opts)
     
     def append_h5(self, atype: str):
         if not os.path.exists(self.output_path):
             raise RuntimeError("sc-HiC file: " +  self.output_path + " not exists")
         if(atype=='embed'):
-            print("appeding cell embeddings...")
+            print("appending cell embeddings...")
             embed_file = os.path.join(self.data_folder, self.embed_file_name)
             cell_embeddings = np.load(embed_file)
 
@@ -333,7 +348,7 @@ class SCHiCGenerator:
                 emb_grp = hdf.create_group('embed')
                 write_embed(emb_grp, cell_embeddings, self.h5_opts)
         elif(atype=='meta'):
-            print("appeding cell meta data...")
+            print("appending cell meta data...")
             meta_file = os.path.join(self.data_folder, self.meta_file_name)
             if fileType(meta_file) !="pkl":
                 raise FileNotFoundError(f"The file '{meta_file}' is not a pickle file.")
@@ -342,12 +357,12 @@ class SCHiCGenerator:
             with h5py.File(self.output_path, 'a') as hdf:
                 if 'meta' in hdf:
                     # Delete the group 'rgrp'
-                    del hdf['embed']
+                    del hdf['meta']
 
                 meta_grp = hdf.create_group('meta')
-                write_meta(meta_grp, label_info, self.h5_opts)
+                write_meta(meta_grp, label_info, self.embed_label, self.h5_opts)
         elif(atype=='1dtrack'):
-            print("appeding 1d track data...")
+            print("appending 1d track data...")
             for res_tracks in self.tracks:
                 for track_type, track_f_name in res_tracks["track_object"].items():   
                     track_file = os.path.join(self.data_folder, track_f_name)
@@ -406,6 +421,21 @@ class SCHiCGenerator:
         cytoband_file = os.path.join(self.data_folder, self.cytoband_file_name)
         if not os.path.exists(cytoband_file):
             raise FileNotFoundError(f"The file '{cytoband_file}' does not exist.")
+
+    def print_schema(self):
+        if not os.path.exists(self.output_path):
+            raise RuntimeError("sc-HiC file: " +  self.output_path + " does not exist")
+        print_hdf5_structure(self.output_path)
+
+def generate_hic_file(config_path, mode, types=[]):
+    generator = SCHiCGenerator(config_path)
+    if mode == 'create':
+        generator.create_all_h5()
+    elif mode == 'append':
+        for t in types:
+            generator.append_h5(t)
+    elif mode == 'print':
+        generator.print_schema()
 
 if __name__ == "__main__":
     generator =  SCHiCGenerator("../config.JSON")
