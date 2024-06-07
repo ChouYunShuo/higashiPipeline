@@ -1,0 +1,25 @@
+{
+    "data_folder": "/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim",
+    "output_path": "/work/magroup/yunshuoc/scHDF5_data/4DN_scHi-C_Kim_all.h5",
+    "contact_map_path": "tmp",
+    "raw_map_path": "tmp/raw",
+    "embed_file_name": "tmp/embed/exp1_0_origin.npy",
+    "meta_file_name": "label_info.pickle",
+    "embed_label": "cell type",
+    "neighbor_num": 5,
+    "embedding_name": "exp1",
+    "chrom_size_file_name": "Annotation/hg19.chrom.sizes.txt",
+    "cytoband_file_name": "Annotation/cytoBand_hg19.txt",
+    "cell_cnt": 16707,
+    "process_cnt": 50,
+    "_cell_cnt": 16707,
+    "resolutions": [
+        500000
+    ],
+    "h5_opts": {
+        "compression": "gzip",
+        "compression_opts": 6,
+        "shuffle": true,
+        "chunks": true
+    }
+}
