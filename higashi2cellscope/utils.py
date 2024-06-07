@@ -55,54 +55,122 @@ def rlencode(array, chunksize=None):
     return starts, lengths, values
 
 
-def create_mask(res,c_path,  k=30, chrom="chr1", origin_sparse=None):
-	final = np.array(np.sum(origin_sparse, axis=0).todense())
-	size = origin_sparse[0].shape[-1]
-	a = np.zeros((size, size))
-	if k > 0:
-		for i in range(min(k, len(a))):
-			for j in range(len(a) - i):
-				a[j, j + i] = 1
-				a[j + i, j] = 1
-		a = np.ones_like((a)) - a
+def create_mask(res, c_path, k=30, chrom="chr1", origin_sparse=None):
+    """
+    Create a mask for the given resolution and chromosome.
+
+    Parameters
+    ----------
+    res : int
+        Resolution of the mask.
+    c_path : str
+        Path to the cytoband file.
+    k : int, optional
+        Size of the diagonal band to mask out.
+    chrom : str, optional
+        Chromosome name.
+    origin_sparse : array_like, optional
+        Sparse array representing the original data.
+
+    Returns
+    -------
+    array
+        The generated mask.
+    """
+    final = np.array(np.sum(origin_sparse, axis=0).todense())
+    size = origin_sparse[0].shape[-1]
+    a = np.zeros((size, size))
+    if k > 0:
+        for i in range(min(k, len(a))):
+            for j in range(len(a) - i):
+                a[j, j + i] = 1
+                a[j + i, j] = 1
+        a = np.ones_like((a)) - a
 	
-	gap = np.sum(final, axis=-1, keepdims=False) == 0
-	
-	gap_tab = pd.read_table(c_path, sep="\t", header=None)
-	gap_tab.columns = ['chrom', 'start', 'end', 'sth', 'type']
-	gap_list = gap_tab[(gap_tab["chrom"] == chrom) & (gap_tab["type"] == "acen")]
-	start = np.floor((np.array(gap_list['start'])) / res).astype('int')
-	end = np.ceil((np.array(gap_list['end'])) / res).astype('int')
-	
-	for s, e in zip(start, end):
-		a[s:e, :] = 1
-		a[:, s:e] = 1
-	a[gap, :] = 1
-	a[:, gap] = 1
-	
-	return a
+    gap = np.sum(final, axis=-1, keepdims=False) == 0
+
+    gap_tab = pd.read_table(c_path, sep="\t", header=None)
+    gap_tab.columns = ['chrom', 'start', 'end', 'sth', 'type']
+    gap_list = gap_tab[(gap_tab["chrom"] == chrom) & (gap_tab["type"] == "acen")]
+    start = np.floor((np.array(gap_list['start'])) / res).astype('int')
+    end = np.ceil((np.array(gap_list['end'])) / res).astype('int')
+
+    for s, e in zip(start, end):
+        a[s:e, :] = 1
+        a[:, s:e] = 1
+    a[gap, :] = 1
+    a[:, gap] = 1
+
+    return a
 
 def copyGroup(source_group, dest_group):
+    """
+    Recursively copy the contents of a source HDF5 group to a destination group.
+
+    Parameters
+    ----------
+    source_group : h5py.Group
+        The source group to copy from.
+    dest_group : h5py.Group
+        The destination group to copy to.
+    
+    """
     for key, item in source_group.items():
         if isinstance(item, h5py.Dataset):
-            # Create a new dataset in dest_group with the same name, shape, type and data
             dest_group.create_dataset(key, data=item[...], dtype=item.dtype, shape=item.shape)
         elif isinstance(item, h5py.Group):
-            # Create a new subgroup in dest_group with the same name
             dest_subgroup = dest_group.create_group(key)
-            # Recursively copy the items in this subgroup to the new subgroup
             copyGroup(item, dest_subgroup)
 
 def copyDataset(item, dest_group, track_type):
+    """
+    Copy a single HDF5 dataset to a destination group with a specified track type.
+
+    Parameters
+    ----------
+    item : h5py.Dataset
+        The dataset to copy.
+    dest_group : h5py.Group
+        The destination group to copy to.
+    track_type : str
+        The name to give the copied dataset in the destination group.
+    
+    """
     if isinstance(item, h5py.Dataset):
-        # Create a new dataset in dest_group with the same name, shape, type and data
         dest_group.create_dataset(track_type, data=item[...], dtype=item.dtype, shape=item.shape)
         
 
 def fileType(fname: str):
+    """
+    Determine the file type based on the file extension.
+
+    Parameters
+    ----------
+    fname : str
+        The name of the file.
+    Returns
+    -------
+    str
+        The determined file type ('npy', 'pkl', 'csv', or 'na' for unknown).
+    """
     return 'npy' if fname.endswith('npy') else 'pkl' if fname.endswith('pkl') else 'pkl' if fname.endswith('pickle') else 'csv' if fname.endswith('csv') else 'na'
 
 def merge_temp_h5_files(original_h5_path, temp_folder, process_cnt, res):
+    """
+    Merge temporary HDF5 files into an original HDF5 file.
+
+    Parameters
+    ----------
+    original_h5_path : str
+        Path to the original HDF5 file.
+    temp_folder : str
+        Directory containing the temporary HDF5 files.
+    process_cnt : int
+        Number of temporary files to merge.
+    res : int
+        Resolution to use for merging.
+    
+    """
     with h5py.File(original_h5_path, 'a') as original_hdf:
         res_grp = original_hdf["resolutions"][str(res)]
         cell_groups = res_grp["cells"]
@@ -119,6 +187,17 @@ def load_pickle(file_path):
     return data
 
 def print_hdf5_structure(file_path):
+    """
+    Print the structure of an HDF5 file, including groups and datasets, with
+    indentation to represent depth in the hierarchy. Recursively prints only
+    the first child of the 'cells' group.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the HDF5 file.
+
+    """
     def print_attrs(name, obj, depth=0):
         padding = ' ' * (depth * 4)  # 4 spaces for each level of depth
         if isinstance(obj, h5py.Group):
