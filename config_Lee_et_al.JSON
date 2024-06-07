@@ -1,6 +1,4 @@
 {
-    "data_folder": "/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al",
-    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Lee_et_al_002.h5",
     "contact_map_path": "temp",
     "raw_map_path": "temp/raw",
     "embed_file_name": "temp/embed/exp1_0_origin.npy",
@@ -18,9 +16,12 @@
     "embedding_name": "exp1",
     "chrom_size_file_name": "Annotation/hg19.chrom.sizes.txt",
     "cytoband_file_name": "Annotation/cytoBand_hg19.txt",
-    "cell_cnt": 4,
-    "process_cnt": 4,
+    "below_is_for_cellScope": "",
+    "data_folder": "/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al",
+    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Lee_et_al_all.h5",
+    "cell_cnt": 4238,
     "_cell_cnt": 4238,
+    "process_cnt": 25,
     "resolutions": [
         500000
     ],
