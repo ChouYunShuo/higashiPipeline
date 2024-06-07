@@ -1,4 +1,5 @@
-./higashi2cellscope/temp_h5/*
-./higashi2cellscope/__pycache__/*
+higashi2cellscope/temp_h5
+higashi2cellscope/__pycache__
 
 **/.DS_Store
+
