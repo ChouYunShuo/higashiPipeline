@@ -219,8 +219,55 @@ def print_hdf5_structure(file_path):
     with h5py.File(file_path, 'r') as file:
         print_attrs('', file['/'])
 
+def check_hdf5_structure(file_path):
+    required_embed_meta_datasets = ['/embed/pca', '/embed/umap','/meta/label']
+    
+    required_resolution_datasets = [
+        'bins/chrom', 'bins/start','bins/end',
+        'chroms/length', 'chroms/name',
+        'cells/cell_0/indexes/bin1_offset', 'cells/cell_0/indexes/chrom_offset',
+        'cells/cell_0/pixels/bin1_id', 'cells/cell_0/pixels/bin2_id', 'cells/cell_0/pixels/count'
+    ]
+    
+    def check_datasets(group, datasets):
+        for ds in datasets:
+            if ds not in group:
+                return False, f"Missing dataset {ds}"
+        return True, None
+
+    with h5py.File(file_path, 'r') as f:
+        if '/embed' in f and '/meta' not in f:
+            return False, "Missing /meta group"
+        if '/meta' in f and '/embed' not in f:
+            return False, "Missing /embed group"
+
+        if '/embed' in f and '/meta' in f:
+            result, message = check_datasets(f, required_embed_meta_datasets)
+            if not result:
+                return False, message
+
+        if '/resolutions' not in f:
+            return False, "Missing /resolutions group"
+        
+        for resolution in f['/resolutions']:
+            resolution_group = f['/resolutions'][resolution]
+            for required_ds in required_resolution_datasets:
+                if required_ds not in resolution_group:
+                    return False, f"Missing dataset {required_ds} in {resolution}"
+
+    return True, "HDF5 structure is valid"
+ 
 if __name__ == "__main__":
-    print_hdf5_structure('/work/magroup/yunshuoc/scHDF5_data/Lee_et_al_002.h5')
+    #file_path = '/work/magroup/yunshuoc/scHDF5_data/4DN_scHi-C_Kim_all.h5'
+    file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/tmp/chr1_exp1_nbr_0_impute.hdf5'
+   
+    is_valid, message = check_hdf5_structure(file_path)
+    if is_valid:
+        print("HDF5 structure is valid.")
+    else:
+        print(f"Invalid HDF5 structure: {message}")
+
+    #print_hdf5_structure(file_path)
 
     # check pickle file
     # file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/label_info.pickle'

@@ -7,7 +7,7 @@ import pickle
 from sklearn.decomposition import PCA
 from umap import UMAP
 from collections import defaultdict
-from utils import rlencode, fileType, copyDataset, merge_temp_h5_files, print_hdf5_structure
+from utils import rlencode, fileType, copyDataset, merge_temp_h5_files, print_hdf5_structure, check_hdf5_structure
 from matrixParser import MatrixParser
 import multiprocessing as mp
 import tqdm
@@ -426,6 +426,15 @@ class SCHiCGenerator:
         if not os.path.exists(self.output_path):
             raise RuntimeError("sc-HiC file: " +  self.output_path + " does not exist")
         print_hdf5_structure(self.output_path)
+    
+    def check_schema(self):
+        if not os.path.exists(self.output_path):
+            raise RuntimeError("sc-HiC file: " +  self.output_path + " does not exist")
+        is_valid, message = check_hdf5_structure(self.output_path)
+        if is_valid:
+            print("HDF5 structure is valid.")
+        else:
+            print(f"Invalid HDF5 structure: {message}")
 
 def generate_hic_file(config_path, mode, types=[]):
     generator = SCHiCGenerator(config_path)
@@ -436,6 +445,8 @@ def generate_hic_file(config_path, mode, types=[]):
             generator.append_h5(t)
     elif mode == 'print':
         generator.print_schema()
+    elif mode == 'check':
+        generator.check_schema()
 
 if __name__ == "__main__":
     generator =  SCHiCGenerator("../config.JSON")
