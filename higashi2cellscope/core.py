@@ -189,25 +189,25 @@ def write_track(source_dataset, cur_grp, track_type: str):
     copyDataset(source_dataset, cur_grp, track_type)
 
 def process_cells_range(start, end, process_id, temp_folder, neighbor_num, cell_cnt, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
-        temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
-        with h5py.File(temp_h5_path, 'w') as hdf:
-            for i in range(start, end):
-                print(f"Process {process_id} processing cell {i}")
-                cur_cell_grp = hdf.create_group(f"cell_{i}")
-                cell_grp_pixels = cur_cell_grp.create_group("pixels")
-                setup_pixels(cell_grp_pixels, n_bins, h5_opts)
-                write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                            chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt)
-                n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-                bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
-                grp_index = cur_cell_grp.create_group("indexes")
-                write_index(grp_index, chrom_offset, bin_offset, h5_opts)
+    temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
+    with h5py.File(temp_h5_path, 'w') as hdf:
+        for i in range(start, end):
+            print(f"Process {process_id} processing cell {i}")
+            cur_cell_grp = hdf.create_group(f"cell_{i}")
+            cell_grp_pixels = cur_cell_grp.create_group("pixels")
+            setup_pixels(cell_grp_pixels, n_bins, h5_opts)
+            write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                        chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt)
+            n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
+            bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
+            grp_index = cur_cell_grp.create_group("indexes")
+            write_index(grp_index, chrom_offset, bin_offset, h5_opts)
 
-                with progress.get_lock():
-                    progress.value += 1
-                    if progress.value % 10 == 0:  # Print progress every 10 cells
-                        print(f"Process {process_id} has completed {progress.value} cells")
-        #print(f"Process {process_id} finished processing cells {start} to {end-1}")
+            with progress.get_lock():
+                progress.value += 1
+                if progress.value % 10 == 0:  # Print progress every 10 cells
+                    print(f"Process {process_id} has completed {progress.value} cells")
+    #print(f"Process {process_id} finished processing cells {start} to {end-1}")
 
 
 
