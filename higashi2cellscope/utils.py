@@ -256,16 +256,28 @@ def check_hdf5_structure(file_path):
                     return False, f"Missing dataset {required_ds} in {resolution}"
 
     return True, "HDF5 structure is valid"
- 
-if __name__ == "__main__":
-    #file_path = '/work/magroup/yunshuoc/scHDF5_data/4DN_scHi-C_Kim_all.h5'
+
+def test_check_h5_structure():
+    file_path = '/work/magroup/yunshuoc/scHDF5_data/4DN_scHi-C_Kim_all.h5'
     file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/tmp/chr1_exp1_nbr_0_impute.hdf5'
-   
     is_valid, message = check_hdf5_structure(file_path)
     if is_valid:
         print("HDF5 structure is valid.")
     else:
         print(f"Invalid HDF5 structure: {message}")
+
+if __name__ == "__main__":
+    file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/temp/raw/chr1_sparse_adj.npy'
+    data = np.load(file_path, allow_pickle=True)
+    sparse_matrix = data[0].tocoo()
+
+    # Extract row indices, column indices, and probabilities
+    id1 = sparse_matrix.row
+    id2 = sparse_matrix.col
+    prob = sparse_matrix.data
+    print(id1[:10], id2[:10], prob[:10])
+    print(len(data))
+
 
     #print_hdf5_structure(file_path)
 
