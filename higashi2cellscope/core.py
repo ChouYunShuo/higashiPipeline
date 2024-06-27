@@ -26,36 +26,58 @@ OFFSET_DTYPE = np.int64
 │    ├── pca
 │    └── umap
 └── resolutions
-     ├── 10000
-     │   ├── bins
-     |   |   ├── chrom
-     |   |   ├── start
-     |   |   └── end
-     │   ├── chroms
-     |   |   ├── name
-     |   |   └── length
-     │   └── cells
-     │       ├── cell_0
-     │       │   ├── pixels
-     |       |   |   ├── bin1_id
-     |       |   |   ├── bin2_id
-     |       |   |   └── count
-     │       │   ├── raw
-     |       |   |   ├── bin1_id
-     |       |   |   ├── bin2_id
-     |       |   |   └── count
-     │       │   ├── indexes
-     │       │   │   ├── chrom_offset
-     |       |   │   ├── bin1_offset
-     |       |   │   └── raw_bin1_offset
-     │       │   ├── tracks
-     |       |       └── insulation
-     │       ├── cell_1
-     │       │   ├── pixels
-     │       │   └── indexes
-     │   
-     ├── 50000
-     │   
+    ├── 10000
+    │   ├── bins
+    |   |   ├── chrom
+    |   |   ├── start
+    |   |   └── end
+    │   ├── chroms
+    |   |   ├── name
+    |   |   └── length
+    │   └── layers
+    │         ├── raw
+    │         │   ├── cell_0
+    │         │   │   ├── pixels
+    │         │   │   │   ├── bin1_id
+    │         │   │   │   ├── bin2_id
+    │         │   │   │   └── count
+    │         │   │   └── indexes
+    │         │   │       ├── chrom_offset
+    │         │   │       └── bin1_offset
+    │         │   ├── cell_1
+    │         │   ├── cell_2
+    │         │   ├── group_0
+    │         │   └── group_1
+    │         ├── imputed_0neighbor
+    │         │   ├── cell_0
+    │         │   │   ├── pixels
+    │         │   │   │   ├── bin1_id
+    │         │   │   │   ├── bin2_id
+    │         │   │   │   └── count
+    │         │   │   └── indexes
+    │         │   │       ├── chrom_offset
+    │         │   │       └── bin1_offset
+    │         │   ├── cell_1
+    │         │   └── cell_2
+    │         ├── imputed_5neighbor
+    │         │   ├── cell_0
+    │         │   │   ├── pixels
+    │         │   │   │   ├── bin1_id
+    │         │   │   │   ├── bin2_id
+    │         │   │   │   └── count
+    │         │   │   └── indexes
+    │         │   │       ├── chrom_offset
+    │         │   │       └── bin1_offset
+    │         │   ├── cell_1
+    │         │   └── cell_2
+    │         ├── tracks
+    |         │    └── insulation
+    │         │       ├── cell_0
+    │         │       ├── cell_1
+    │         │       ├── group_0
+    │         │       └── group_1
+    │   
+    ├── 50000
 
 """
 def sort_key(item):
@@ -173,7 +195,7 @@ def get_raw_pixel_index(grp, n_bins, n_pixels):
 
     return bin1_offset
 
-def write_index(grp, chrom_offset, bin_offset, raw_bin_offset, h5_opts):
+def write_index(grp, chrom_offset, bin_offset, h5_opts):
     grp.create_dataset(
         "chrom_offset",
         shape=(len(chrom_offset),),
@@ -185,12 +207,6 @@ def write_index(grp, chrom_offset, bin_offset, raw_bin_offset, h5_opts):
         shape=(len(bin_offset),),
         dtype=OFFSET_DTYPE,
         data=bin_offset, **h5_opts
-    )
-    grp.create_dataset(
-        "raw_bin1_offset",
-        shape=(len(raw_bin_offset),),
-        dtype=OFFSET_DTYPE,
-        data=raw_bin_offset, **h5_opts
     )
 
 # append functions
@@ -212,37 +228,45 @@ def write_track(source_dataset, cur_grp, track_type: str):
         del cur_grp[track_type]
     copyDataset(source_dataset, cur_grp, track_type)
 
-def process_cells_range(start, end, process_id, temp_folder, neighbor_num, cell_cnt, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
+def process_cells_range(start, end, process_id, temp_folder, neighbor_num, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
     temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
     with h5py.File(temp_h5_path, 'w') as hdf:
+        ## write raw
+        raw_grp = hdf.create_group("raw")
         for i in range(start, end):
-            print(f"Process {process_id} processing cell {i}")
-            cur_cell_grp = hdf.create_group(f"cell_{i}")
-
-            ## write inpute
-            cell_grp_pixels = cur_cell_grp.create_group("pixels")
-            setup_pixels(cell_grp_pixels, n_bins, h5_opts)
-            write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, False)
-            
-            ## write raw
-            cell_raw_grp_pixels = cur_cell_grp.create_group("raw")
+            cur_cell_raw_grp = raw_grp.create_group(f"cell_{i}")
+            cell_raw_grp_pixels = cur_cell_raw_grp.create_group("pixels")
             setup_pixels(cell_raw_grp_pixels, n_bins, h5_opts)
             write_pixels(cell_raw_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, True)
+                        chrom_offset, i, neighbor_num[0], list(cur_cell_raw_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, True)
             
-            n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-            bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
-            n_raw_pixels = len(cur_cell_grp["raw"].get("bin1_id"))
-            raw_bin_offset = get_raw_pixel_index(cur_cell_grp["raw"], n_bins, n_raw_pixels)
+           
+            n_raw_pixels = len(cell_raw_grp_pixels.get("bin1_id"))
+            raw_bin_offset = get_raw_pixel_index(cell_raw_grp_pixels, n_bins, n_raw_pixels)
+            # Create indexes group for raw data
+            raw_grp_index = cur_cell_raw_grp.create_group("indexes")
+            write_index(raw_grp_index, chrom_offset, raw_bin_offset, h5_opts)
 
-            grp_index = cur_cell_grp.create_group("indexes")
-            write_index(grp_index, chrom_offset, bin_offset, raw_bin_offset, h5_opts)
+        ## write inpute
+        for idx, num in enumerate(neighbor_num):
+            neigh_group = hdf.create_group(f"imputed_{num}neighbor")
+            for i in range(start, end):
+                print(f"Process {process_id} processing cell {i} neighbor {num}")
+                cur_cell_grp = neigh_group.create_group(f"cell_{i}")
+                cell_impute_grp_pixels = cur_cell_grp.create_group("pixels")
+                setup_pixels(cell_impute_grp_pixels, n_bins, h5_opts)
+                write_pixels(cell_impute_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                            chrom_offset, i, num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, False)
+                
+                n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
+                bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
+                impute_grp_index = cur_cell_grp.create_group("indexes")
+                write_index(impute_grp_index, chrom_offset, bin_offset, h5_opts)
 
-            with progress.get_lock():
-                progress.value += 1
-                if progress.value % 10 == 0:  # Print progress every 10 cells
-                    print(f"Process {process_id} has completed {progress.value} cells")
+                with progress[idx].get_lock():
+                    progress[idx].value += 1
+                    if progress[idx].value % 10 == 0:  # Print progress every 10 cells
+                        print(f"Process {process_id} has completed {progress[idx].value} cells for neighbor {num}")
     #print(f"Process {process_id} finished processing cells {start} to {end-1}")
 
 
@@ -314,7 +338,7 @@ class SCHiCGenerator:
             write_bins(res, np_chroms_names,
                        np_chroms_length, grp_bins, self.h5_opts)
 
-            cell_groups = res_grp.create_group("cells")
+            layer_groups = res_grp.create_group("layers")
 
             n_bins = len(res_grp["bins"].get("chrom"))
             n_chroms = len(res_grp["chroms"].get("length"))
@@ -322,7 +346,7 @@ class SCHiCGenerator:
                     res_grp["bins"], n_chroms, n_bins)
         
             if self.process_cnt == 1:
-                self.process_cells(cell_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file)
+                self.process_cells(layer_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file)
         if self.process_cnt > 1:
             self.parallel_process_cells(contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, n_bins)
     
@@ -333,7 +357,7 @@ class SCHiCGenerator:
         os.makedirs(temp_folder, exist_ok=True)
         
         # Create a shared progress counter
-        progress = mp.Value('i', 0)
+        progress = [mp.Value('i', 0) for _ in self.neighbor_num]
         
         # Create a pool of worker processes
         processes = []
@@ -341,7 +365,7 @@ class SCHiCGenerator:
             start = process_id * cells_per_process
             end = min((process_id + 1) * cells_per_process, self.cell_cnt)
             if start < end:
-                p = mp.Process(target=process_cells_range, args=(start, end, process_id, temp_folder, self.neighbor_num, self.cell_cnt, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, self.embedding_name, self.h5_opts, n_bins, progress, self.process_cnt))
+                p = mp.Process(target=process_cells_range, args=(start, end, process_id, temp_folder, self.neighbor_num, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, self.embedding_name, self.h5_opts, n_bins, progress, self.process_cnt))
                 processes.append(p)
                 p.start()
 
@@ -349,25 +373,26 @@ class SCHiCGenerator:
         for p in processes:
             p.join()
         # Merge the temporary HDF5 files into the original HDF5 file
-        merge_temp_h5_files(self.output_path, temp_folder, self.process_cnt, res)
+        merge_temp_h5_files(self.output_path, temp_folder, self.process_cnt, res, self.neighbor_num)
 
-    def process_cells(self, cell_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file):
+    def process_cells(self, layer_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file):
         for i in range(self.cell_cnt):
             print("cell "+str(i)+":")
-            cur_cell_grp = cell_groups.create_group(
+            cur_cell_grp = layer_groups.create_group(
                 "cell_"+str(i))
             
             ## write inpute
-            cell_grp_pixels = cur_cell_grp.create_group("pixels")
-            setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
-            write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, self.neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, False)
-            
+            for num in self.neighbor_num:
+                cell_grp_pixels = cur_cell_grp.create_group("pixels")
+                setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
+                write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                            chrom_offset, i, num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, False)
+                
             ## write raw
             cell_raw_grp_pixels = cur_cell_grp.create_group("raw")
             setup_pixels(cell_raw_grp_pixels, n_bins, self.h5_opts)
             write_pixels(cell_raw_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, self.neighbor_num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, True)
+                        chrom_offset, i, self.neighbor_num[0], list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, True)
             
             n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
             bin_offset = get_pixel_index(
