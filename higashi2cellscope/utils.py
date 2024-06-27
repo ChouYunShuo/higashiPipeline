@@ -3,7 +3,7 @@ import pandas as pd
 import h5py
 import os
 import pickle
-import pprint
+from collections import defaultdict
 OFFSET_DTYPE = np.int64
 
 
@@ -155,7 +155,7 @@ def fileType(fname: str):
     """
     return 'npy' if fname.endswith('npy') else 'pkl' if fname.endswith('pkl') else 'pkl' if fname.endswith('pickle') else 'csv' if fname.endswith('csv') else 'na'
 
-def merge_temp_h5_files(original_h5_path, temp_folder, process_cnt, res):
+def merge_temp_h5_files(original_h5_path, temp_folder, process_cnt, res, neighbor_num):
     """
     Merge temporary HDF5 files into an original HDF5 file.
 
@@ -173,12 +173,23 @@ def merge_temp_h5_files(original_h5_path, temp_folder, process_cnt, res):
     """
     with h5py.File(original_h5_path, 'a') as original_hdf:
         res_grp = original_hdf["resolutions"][str(res)]
-        cell_groups = res_grp["cells"]
+        layer_groups = res_grp["layers"]
+
+        raw_grp = layer_groups.create_group("raw")
+        imputed_grps = {}
+        for num in neighbor_num:
+            imputed_grps[num] = layer_groups.create_group(f"imputed_{num}neighbor")
         for process_id in range(process_cnt):
             temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
             with h5py.File(temp_h5_path, 'r') as temp_hdf:
-                for cell_key in temp_hdf.keys():
-                    temp_hdf.copy(cell_key, cell_groups)
+                for cell_key in temp_hdf["raw"].keys():
+                    temp_hdf.copy(f"raw/{cell_key}", raw_grp)
+                
+                for num in neighbor_num:
+                    for cell_key in temp_hdf[f"imputed_{num}neighbor"].keys():
+                        temp_hdf.copy(f"imputed_{num}neighbor/{cell_key}", imputed_grps[num])
+                
+
             os.remove(temp_h5_path)  # Remove temporary file after merging
 
 def load_pickle(file_path):
@@ -202,7 +213,7 @@ def print_hdf5_structure(file_path):
         padding = ' ' * (depth * 4)  # 4 spaces for each level of depth
         if isinstance(obj, h5py.Group):
             print(f"{padding}Group: {name}")
-            if name.endswith('/cells'):
+            if name.endswith('neighbor') or name.endswith('raw'):
                 first_child = list(obj.keys())[0] if obj.keys() else None
                 if first_child:
                     first_child_path = f"{name}/{first_child}"
@@ -257,6 +268,17 @@ def check_hdf5_structure(file_path):
 
     return True, "HDF5 structure is valid"
 
+def get_celltype_dict(file_path,label_name):
+    data = load_pickle(file_path)
+    for key, value in data.items():
+        print(f"Key: {key}, Type: {type(value)}")
+    cellTypeDict = defaultdict(list)
+
+    for idx, type in enumerate(data[label_name]):
+        cellTypeDict[type].append(idx)
+
+    return cellTypeDict
+
 def test_check_h5_structure():
     file_path = '/work/magroup/yunshuoc/scHDF5_data/4DN_scHi-C_Kim_all.h5'
     file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/tmp/chr1_exp1_nbr_0_impute.hdf5'
@@ -267,30 +289,12 @@ def test_check_h5_structure():
         print(f"Invalid HDF5 structure: {message}")
 
 if __name__ == "__main__":
-    file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/temp/raw/chr1_sparse_adj.npy'
-    data = np.load(file_path, allow_pickle=True)
-    sparse_matrix = data[0].tocoo()
-
-    # Extract row indices, column indices, and probabilities
-    id1 = sparse_matrix.row
-    id2 = sparse_matrix.col
-    prob = sparse_matrix.data
-    print(id1[:10], id2[:10], prob[:10])
-    print(len(data))
-
-
     #print_hdf5_structure(file_path)
-
-    # check pickle file
-    # file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/label_info.pickle'
-    # #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/label_info.pickle'  # Adjust the path to your pickle file
-    # data = load_pickle(file_path)
-    
-    # # Use pprint to print the data structure in a readable format
-    # for key, value in data.items():
-    #     print(f"Key: {key}, Type: {type(value)}")
-    # print(len(data["cell type"]))
-
+    pass
+    #check pickle file
+    #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/label_info.pickle'
+    #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al/label_info.pickle'
+    #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/label_info.pickle'  # Adjust the path to your pickle file
 
     # check h5
 
