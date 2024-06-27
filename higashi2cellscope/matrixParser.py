@@ -45,8 +45,7 @@ class MatrixParser:
                     coordinates = hdf['coordinates']
                     xs, ys = coordinates[:, 0], coordinates[:, 1]
                     proba = np.array(hdf[f"cell_{self.cell_id}"])
-                    # proba = np.maximum(proba - np.min(proba), 0.0)
-                    # proba[proba <= 1e-5] = 0.0
+                    
             proba = self.process_proba(proba)
             m = np.zeros((size, size))
             np.add.at(m, (xs, ys), proba)
