@@ -440,24 +440,30 @@ class SCHiCGenerator:
             
             with h5py.File(self.output_path, 'a') as hdf:
                 for res_tracks in self.tracks:
-                    cur_res = res_tracks["resolution"]
-                    cell_groups = [f"resolutions/{cur_res}/cells/cell_{i}" for i in range(self.cell_cnt)]
+                    cur_res = res_tracks[f"resolution"]
+                    res_grp = hdf[f"resolutions/{cur_res}/layers"]
+            
+                    # Ensure the 'tracks' group exists
+                    if 'tracks' in res_grp:
+                        del res_grp['tracks']
+                    tracks_grp = res_grp.create_group('tracks')
+                    
                     
                     # Open track files outside the inner loops to minimize the number of open calls
                     track_files = {}
                     for track_type, track_f_name in res_tracks["track_object"].items():
                         track_file_path = os.path.join(self.data_folder, track_f_name)
                         track_files[track_type] = h5py.File(track_file_path, 'r')
-
-                    for cell_id, cell_group in enumerate(cell_groups):
-                        cur_grp = hdf[cell_group]
-                        if "tracks" in cur_grp:
-                            del cur_grp["tracks"]
-                        track_grp = cur_grp.create_group('tracks')
-                        for track_type, f in track_files.items():
-                            source_grp = f[f"insulation/cell_{cell_id}"]
-                            write_track(source_grp, track_grp, track_type)
                     
+                    for track_type, f in track_files.items():
+                        if track_type in tracks_grp:
+                            del tracks_grp[track_type]
+                        track_grp = tracks_grp.create_group(track_type)
+                        for cell_id in range(self.cell_cnt):
+                            tgt_grp = track_grp.create_group(f"cell_{cell_id}")
+                            source_grp = f[f"insulation/cell_{cell_id}"]
+                            write_track(source_grp, tgt_grp, track_type)
+                        
                     for f in track_files.values():
                         f.close()
         else:
