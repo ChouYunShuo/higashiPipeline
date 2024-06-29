@@ -2,27 +2,27 @@ import h5py
 import numpy as np
 import os
 from tqdm import trange
-from multiprocessing import Pool
+import multiprocessing as mp
 from utils import create_mask
 
-def process_raw_cell(args):
-    origin_sparse, cell_id, size = args
-    cell_coo_origin = origin_sparse[cell_id].tocoo()
-    xs, ys, proba = cell_coo_origin.row, cell_coo_origin.col, cell_coo_origin.data
-    proba = process_proba(proba)
+def process_raw_cell(q, start, end, origin_sparse, size):
     m = np.zeros((size, size))
-    np.add.at(m, (xs, ys), proba)
-    np.add.at(m, (ys, xs), proba)
-    return m
+    for cell_id in range(start, end):
+        cell_coo_origin = origin_sparse[cell_id].tocoo()
+        xs, ys, proba = cell_coo_origin.row, cell_coo_origin.col, cell_coo_origin.data
+        proba = process_proba(proba)
+        np.add.at(m, (xs, ys), proba)
+        np.add.at(m, (ys, xs), proba)
+    q.put(m)
 
-def process_imputed_cell(args):
-    hdf, cell_id, xs, ys, size = args
-    proba = np.array(hdf[f"cell_{cell_id}"])
-    proba = process_proba(proba)
+def process_imputed_cell(q, start, end, hdf, xs, ys, size):
     m = np.zeros((size, size))
-    np.add.at(m, (xs, ys), proba)
-    np.add.at(m, (ys, xs), proba)
-    return m
+    for cell_id in range(start, end):
+        proba = np.array(hdf[f"cell_{cell_id}"])
+        proba = process_proba(proba)
+        np.add.at(m, (xs, ys), proba)
+        np.add.at(m, (ys, xs), proba)
+    q.put(m)
 
 def process_proba(proba):
     proba /= np.sum(proba)
@@ -46,7 +46,7 @@ class GroupMatrixParser:
 
     def __iter__(self):
         range_iter = trange(len(self.chrom_list), desc="Processing Chromosomes")
-
+        cells_per_process = (len(self.cell_ids) + self.process_cnt - 1) // self.process_cnt
         for idx in range_iter:
             chrom = self.chrom_list[idx].decode('utf-8')
             file_path = os.path.join(self.raw_dir, f"chr{chrom}_sparse_adj.npy")
@@ -55,20 +55,37 @@ class GroupMatrixParser:
             mask = 1 - create_mask(self.res, self.cytoband_path, -1, chrom, origin_sparse)
 
             m = np.zeros((size, size))
+            q = mp.Queue()
+            processes = []
+
+            cells_per_process = len(self.cell_ids) // self.process_cnt
 
             if self.is_raw:
-                cell_args = [(origin_sparse, cell_id, size) for cell_id in self.cell_ids]
-                with Pool(self.process_cnt) as pool:
-                    for cell_m in pool.imap(process_raw_cell, cell_args):
-                        m += cell_m
+                for process_id in range(self.process_cnt):
+                    start = process_id * cells_per_process
+                    end = min((process_id + 1) * cells_per_process, len(self.cell_ids))
+                    if start < end:
+                        p = mp.Process(target=process_raw_cell, args=(q, start, end, origin_sparse, size))
+                        processes.append(p)
+                        p.start()
             else:
                 with h5py.File(os.path.join(self.impute_dir, f"chr{chrom}_{self.embedding_name}_nbr_{self.neighbors}_impute.hdf5"), "r") as hdf:
                     coordinates = hdf['coordinates']
                     xs, ys = coordinates[:, 0], coordinates[:, 1]
-                    cell_args = [(hdf, cell_id, xs, ys, size) for cell_id in self.cell_ids]
-                    with Pool(self.process_cnt) as pool:
-                        for cell_m in pool.imap(process_imputed_cell, cell_args):
-                            m += cell_m
+                    for process_id in range(self.process_cnt):
+                        start = process_id * cells_per_process
+                        end = min((process_id + 1) * cells_per_process, len(self.cell_ids))
+                        if start < end:
+                            p = mp.Process(target=process_imputed_cell, args=(q, start, end, hdf, xs, ys, size))
+                            processes.append(p)
+                            p.start()
+
+            for _ in processes:
+                cell_m = q.get()
+                m += cell_m
+
+            for p in processes:
+                p.join()
 
             m *= mask
 
