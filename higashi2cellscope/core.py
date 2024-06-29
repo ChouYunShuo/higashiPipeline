@@ -7,8 +7,9 @@ import pickle
 from sklearn.decomposition import PCA
 from umap import UMAP
 from collections import defaultdict
-from utils import rlencode, fileType, copyDataset, merge_temp_h5_files, print_hdf5_structure, check_hdf5_structure
+from utils import rlencode, fileType, copyDataset, merge_temp_h5_files, print_hdf5_structure, check_hdf5_structure, get_celltype_dict
 from matrixParser import MatrixParser
+from groupMatrixParser import GroupMatrixParser
 import multiprocessing as mp
 
 CHROM_DTYPE = np.dtype("S")
@@ -158,6 +159,17 @@ def write_pixels(grp, impute_dir, raw_dir, chrom_list, chrom_offset, cell_id, ne
             dset[m_size: m_size + n] = chunk[col]
         m_size += n
 
+def write_group_pixels(grp, impute_dir, raw_dir, chrom_list, chrom_offset, cell_ids, neighbors, columns, res, cytoband_path, embedding_name, process_cnt, is_raw):
+    matrixParser = GroupMatrixParser(impute_dir, raw_dir, chrom_list, chrom_offset, cell_ids, neighbors, res, cytoband_path, embedding_name, process_cnt, is_raw)
+    m_size = 0
+    for chunk in matrixParser:
+        dsets = [grp[col] for col in columns]
+        n = len(chunk[columns[0]])
+        for col, dset in zip(columns, dsets):
+            dset.resize((m_size + n,))
+            dset[m_size: m_size + n] = chunk[col]
+        m_size += n
+
 def get_bin_index(grp, n_chroms, n_bins):
     chrom_ids = grp["chrom"]
     chrom_offset = np.zeros(n_chroms + 1, dtype=OFFSET_DTYPE)
@@ -170,19 +182,6 @@ def get_bin_index(grp, n_chroms, n_bins):
     return chrom_offset
 
 def get_pixel_index(grp, n_bins, n_pixels):
-    bin1 = np.array(grp["bin1_id"])
-    bin1_offset = np.zeros(n_bins + 1, dtype=OFFSET_DTYPE)
-    curr_val = 0
-
-    for start, length, value in zip(*rlencode(bin1, 1000000)):
-        bin1_offset[curr_val: value + 1] = start
-        curr_val = value+1
-
-    bin1_offset[curr_val:] = n_pixels
-
-    return bin1_offset
-
-def get_raw_pixel_index(grp, n_bins, n_pixels):
     bin1 = np.array(grp["bin1_id"])
     bin1_offset = np.zeros(n_bins + 1, dtype=OFFSET_DTYPE)
     curr_val = 0
@@ -230,46 +229,41 @@ def write_track(source_dataset, cur_grp, track_type: str):
 
 def process_cells_range(start, end, process_id, temp_folder, neighbor_num, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
     temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
+    
+    def process_single_cell(parent_group, cell_index, neighbor_num, is_raw):
+        cur_cell_grp = parent_group.create_group(f"cell_{cell_index}")
+        cell_grp_pixels = cur_cell_grp.create_group("pixels")
+        setup_pixels(cell_grp_pixels, n_bins, h5_opts)
+        write_pixels(
+            cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+            chrom_offset, cell_index, neighbor_num, list(cur_cell_grp["pixels"]),
+            res, cytoband_file, embedding_name, process_cnt, is_raw
+        )
+        n_pixels = len(cell_grp_pixels.get("bin1_id"))
+        bin_offset = get_pixel_index(cell_grp_pixels, n_bins, n_pixels)
+        grp_index = cur_cell_grp.create_group("indexes")
+        write_index(grp_index, chrom_offset, bin_offset, h5_opts)
+        return n_pixels
+
+    def update_progress(progress, idx, num, process_id):
+        with progress[idx].get_lock():
+            progress[idx].value += 1
+            if progress[idx].value % 10 == 0:  # Print progress every 10 cells
+                print(f"Process {process_id} has completed {progress[idx].value} cells for neighbor {num}")
+
     with h5py.File(temp_h5_path, 'w') as hdf:
-        ## write raw
+        # Write raw data
         raw_grp = hdf.create_group("raw")
         for i in range(start, end):
-            cur_cell_raw_grp = raw_grp.create_group(f"cell_{i}")
-            cell_raw_grp_pixels = cur_cell_raw_grp.create_group("pixels")
-            setup_pixels(cell_raw_grp_pixels, n_bins, h5_opts)
-            write_pixels(cell_raw_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, neighbor_num[0], list(cur_cell_raw_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, True)
-            
-           
-            n_raw_pixels = len(cell_raw_grp_pixels.get("bin1_id"))
-            raw_bin_offset = get_raw_pixel_index(cell_raw_grp_pixels, n_bins, n_raw_pixels)
-            # Create indexes group for raw data
-            raw_grp_index = cur_cell_raw_grp.create_group("indexes")
-            write_index(raw_grp_index, chrom_offset, raw_bin_offset, h5_opts)
+            process_single_cell(raw_grp, i, neighbor_num[0], True)
 
-        ## write inpute
+        # Write imputed data
         for idx, num in enumerate(neighbor_num):
             neigh_group = hdf.create_group(f"imputed_{num}neighbor")
             for i in range(start, end):
                 print(f"Process {process_id} processing cell {i} neighbor {num}")
-                cur_cell_grp = neigh_group.create_group(f"cell_{i}")
-                cell_impute_grp_pixels = cur_cell_grp.create_group("pixels")
-                setup_pixels(cell_impute_grp_pixels, n_bins, h5_opts)
-                write_pixels(cell_impute_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                            chrom_offset, i, num, list(cur_cell_grp["pixels"]), res, cytoband_file, embedding_name, process_cnt, False)
-                
-                n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-                bin_offset = get_pixel_index(cur_cell_grp["pixels"], n_bins, n_pixels)
-                impute_grp_index = cur_cell_grp.create_group("indexes")
-                write_index(impute_grp_index, chrom_offset, bin_offset, h5_opts)
-
-                with progress[idx].get_lock():
-                    progress[idx].value += 1
-                    if progress[idx].value % 10 == 0:  # Print progress every 10 cells
-                        print(f"Process {process_id} has completed {progress[idx].value} cells for neighbor {num}")
-    #print(f"Process {process_id} finished processing cells {start} to {end-1}")
-
-
+                process_single_cell(neigh_group, i, num, False)
+                update_progress(progress, idx, num, process_id)
 
 class SCHiCGenerator:
     def __init__(self, config_path):
@@ -324,6 +318,8 @@ class SCHiCGenerator:
         contact_map_file = os.path.join(self.data_folder, self.contact_map_path)
         raw_map_file = os.path.join(self.data_folder, self.raw_map_path)
         cytoband_file = os.path.join(self.data_folder, self.cytoband_file_name)
+        n_bins = n_chroms = 0
+        chrom_offset = []
         with h5py.File(self.output_path, 'r+') as hdf:
             res_grp = hdf.create_group("resolutions/"+str(res))
            
@@ -344,12 +340,15 @@ class SCHiCGenerator:
             n_chroms = len(res_grp["chroms"].get("length"))
             chrom_offset = get_bin_index(
                     res_grp["bins"], n_chroms, n_bins)
-        
             if self.process_cnt == 1:
                 self.process_cells(layer_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file)
         if self.process_cnt > 1:
             self.parallel_process_cells(contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, n_bins)
-    
+        
+        with h5py.File(self.output_path, 'a') as hdf:
+            layer_groups = hdf[f"resolutions/{res}/layers"]
+            self.process_groups(layer_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file)
+          
     def parallel_process_cells(self, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, n_bins):
         # Determine the range of cells each process should handle
         cells_per_process = (self.cell_cnt + self.process_cnt - 1) // self.process_cnt
@@ -376,31 +375,67 @@ class SCHiCGenerator:
         merge_temp_h5_files(self.output_path, temp_folder, self.process_cnt, res, self.neighbor_num)
 
     def process_cells(self, layer_groups, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file):
-        for i in range(self.cell_cnt):
-            print("cell "+str(i)+":")
-            cur_cell_grp = layer_groups.create_group(
-                "cell_"+str(i))
-            
-            ## write inpute
-            for num in self.neighbor_num:
-                cell_grp_pixels = cur_cell_grp.create_group("pixels")
-                setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
-                write_pixels(cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                            chrom_offset, i, num, list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, False)
-                
-            ## write raw
-            cell_raw_grp_pixels = cur_cell_grp.create_group("raw")
-            setup_pixels(cell_raw_grp_pixels, n_bins, self.h5_opts)
-            write_pixels(cell_raw_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
-                        chrom_offset, i, self.neighbor_num[0], list(cur_cell_grp["pixels"]), res, cytoband_file, self.embedding_name, self.process_cnt, True)
-            
-            n_pixels = len(cur_cell_grp["pixels"].get("bin1_id"))
-            bin_offset = get_pixel_index(
-                cur_cell_grp["pixels"], n_bins, n_pixels)
+        print("Processing cells...")
+        def process_single_cell(parent_group, cell_index, neighbor_num, is_raw):
+            cur_cell_grp = parent_group.create_group(f"cell_{cell_index}")
+            cell_grp_pixels = cur_cell_grp.create_group("pixels")
+            setup_pixels(cell_grp_pixels, n_bins, self.h5_opts)
+            write_pixels(
+                cell_grp_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                chrom_offset, cell_index, neighbor_num, list(cur_cell_grp["pixels"]),
+                res, cytoband_file, self.embedding_name, self.process_cnt, is_raw
+            )
+            n_pixels = len(cell_grp_pixels.get("bin1_id"))
+            bin_offset = get_pixel_index(cell_grp_pixels, n_bins, n_pixels)
             grp_index = cur_cell_grp.create_group("indexes")
-
             write_index(grp_index, chrom_offset, bin_offset, self.h5_opts)
-    
+
+        ## Write raw data
+        print("Writing raw data...")
+        raw_grp = layer_groups.create_group("raw")
+        for i in range(self.cell_cnt):
+            process_single_cell(raw_grp, i, self.neighbor_num[0], True)
+
+        ## Write imputed data
+        for num in self.neighbor_num:
+            print(f"Writing impute data for neighbor={num}...")
+            neigh_group = layer_groups.create_group(f"imputed_{num}neighbor")
+            for i in range(self.cell_cnt):
+                print(f"Processing cell {i} for neighbor {num}...")
+                process_single_cell(neigh_group, i, num, False)
+
+    def process_groups(self, layer_grp, n_bins, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file):
+        print("processing psuedo-bulk data...")
+        meta_file = os.path.join(self.data_folder, self.meta_file_name)
+        if fileType(meta_file) !="pkl":
+            raise FileNotFoundError(f"The file '{meta_file}' is not a pickle file.")
+        
+        cell_type_dict = get_celltype_dict(meta_file, self.embed_label)
+        
+        def process_group(parent_group, cell_type, cells, neighbor_num, is_raw):
+            cur_celltype_grp = parent_group.create_group(cell_type)
+            cell_celltype_pixels = cur_celltype_grp.create_group("pixels")
+            setup_pixels(cell_celltype_pixels, n_bins, self.h5_opts)
+            write_group_pixels(
+                cell_celltype_pixels, contact_map_file, raw_map_file, np_chroms_names,
+                chrom_offset, cells, neighbor_num, list(cur_celltype_grp["pixels"]),
+                res, cytoband_file, self.embedding_name, self.process_cnt, is_raw
+            )
+            n_raw_pixels = len(cell_celltype_pixels.get("bin1_id"))
+            raw_bin_offset = get_pixel_index(cell_celltype_pixels, n_bins, n_raw_pixels)
+            raw_grp_index = cur_celltype_grp.create_group("indexes")
+            write_index(raw_grp_index, chrom_offset, raw_bin_offset, self.h5_opts)
+
+        for cell_type, cells in cell_type_dict.items():
+            raw_grp = layer_grp["raw"]
+            print(f"processing raw group for type {cell_type}")
+            process_group(raw_grp, cell_type, cells, self.neighbor_num[0], True)
+
+            for num in self.neighbor_num:
+                print(f"processing imputed_{num}neighbor group for type {cell_type}")
+                impute_grp = layer_grp[f"imputed_{num}neighbor"]
+                process_group(impute_grp, cell_type, cells, num, False)
+
     def append_h5(self, atype: str):
         if not os.path.exists(self.output_path):
             raise RuntimeError("sc-HiC file: " +  self.output_path + " not exists")
@@ -442,19 +477,15 @@ class SCHiCGenerator:
                 for res_tracks in self.tracks:
                     cur_res = res_tracks[f"resolution"]
                     res_grp = hdf[f"resolutions/{cur_res}/layers"]
-            
                     # Ensure the 'tracks' group exists
                     if 'tracks' in res_grp:
                         del res_grp['tracks']
                     tracks_grp = res_grp.create_group('tracks')
-                    
-                    
                     # Open track files outside the inner loops to minimize the number of open calls
                     track_files = {}
                     for track_type, track_f_name in res_tracks["track_object"].items():
                         track_file_path = os.path.join(self.data_folder, track_f_name)
                         track_files[track_type] = h5py.File(track_file_path, 'r')
-                    
                     for track_type, f in track_files.items():
                         if track_type in tracks_grp:
                             del tracks_grp[track_type]
@@ -463,7 +494,6 @@ class SCHiCGenerator:
                             tgt_grp = track_grp.create_group(f"cell_{cell_id}")
                             source_grp = f[f"insulation/cell_{cell_id}"]
                             write_track(source_grp, tgt_grp, track_type)
-                        
                     for f in track_files.values():
                         f.close()
         else:
