@@ -218,7 +218,10 @@ def print_hdf5_structure(file_path):
                 if first_child:
                     first_child_path = f"{name}/{first_child}"
                     first_child_obj = obj[first_child]
+                    cell0_path = f"{name}/cell_0"
+                    cell0_obj = obj[cell0_path]
                     print_attrs(first_child_path, first_child_obj, depth + 1)
+                    print_attrs(cell0_path, cell0_obj, depth + 1)
             else:
                 for key in obj.keys():
                     print_attrs(f"{name}/{key}", obj[key], depth + 1)
@@ -270,8 +273,6 @@ def check_hdf5_structure(file_path):
 
 def get_celltype_dict(file_path,label_name):
     data = load_pickle(file_path)
-    for key, value in data.items():
-        print(f"Key: {key}, Type: {type(value)}")
     cellTypeDict = defaultdict(list)
 
     for idx, type in enumerate(data[label_name]):
@@ -290,19 +291,30 @@ def test_check_h5_structure():
 
 if __name__ == "__main__":
     #print_hdf5_structure(file_path)
-    pass
+   
     #check pickle file
     #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al/label_info.pickle'
-    #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al/label_info.pickle'
+    file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al/label_info.pickle'
     #file_path = '/work/magroup/yunshuoc/Higashi_Pipeline/4DN_scHi-C_Kim/label_info.pickle'  # Adjust the path to your pickle file
+    cd = get_celltype_dict(file_path, "cluster label")
 
-    # check h5
+    for k, v in cd.items():
+        print(k, len(v))
 
-    # with h5py.File("../../../scHDF5_data/Lee_et_al_001.h5", 'r') as f:
-    #     dataset = f["resolutions/500000/cells/cell_1/tracks"]
-    #     print(list(dataset.keys()))
-        # print(len(f[f'resolutions/100000/bins'].get("chrom")))
-        # dataset = f["resolutions/100000/cells/cell_id1/pixels/count"]
-        # print(f"Dataset shape: {dataset.shape}")
-        # print(f"Dataset size: {dataset.size}")
-        # cells = ["cell_0"]
+
+"""
+Keys in label_info
+
+Key: batch id
+Key: age
+Key: total_cg
+Key: average_cg_rate
+Key: total_ch
+Key: average_ch_rate
+Key: hic_counts
+Key: cell_name_higashi
+Key: major
+Key: minor
+Key: cluster label
+Key: cluster label minor
+"""
