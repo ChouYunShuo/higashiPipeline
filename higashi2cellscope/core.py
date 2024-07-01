@@ -222,10 +222,10 @@ def write_meta(grp, data, label_name, h5_opts):
     ascii_label = np.char.encode(cell_type, 'ascii')
     grp.create_dataset("label", shape=(len(ascii_label),), data= ascii_label, **h5_opts)
 
-def write_track(source_dataset, cur_grp, track_type: str):
-    if track_type in cur_grp:
-        del cur_grp[track_type]
-    copyDataset(source_dataset, cur_grp, track_type)
+def write_track(source_dataset, cur_grp, ds_name: str):
+    if ds_name in cur_grp:
+        del cur_grp[ds_name]
+    copyDataset(source_dataset, cur_grp, ds_name)
 
 def process_cells_range(start, end, process_id, temp_folder, neighbor_num, contact_map_file, raw_map_file, np_chroms_names, chrom_offset, res, cytoband_file, embedding_name, h5_opts, n_bins, progress, process_cnt):
     temp_h5_path = os.path.join(temp_folder, f"temp_cells_{process_id}.h5")
@@ -255,6 +255,7 @@ def process_cells_range(start, end, process_id, temp_folder, neighbor_num, conta
         # Write raw data
         raw_grp = hdf.create_group("raw")
         for i in range(start, end):
+            print(f"Process {process_id} processing cell {i}")
             process_single_cell(raw_grp, i, neighbor_num[0], True)
 
         # Write imputed data
@@ -481,6 +482,11 @@ class SCHiCGenerator:
                     if 'tracks' in res_grp:
                         del res_grp['tracks']
                     tracks_grp = res_grp.create_group('tracks')
+
+                    # append chrom_offest
+                    index_grp = tracks_grp.create_group('indexes')
+                    chrom_offset_ds = res_grp[f"imputed_{self.neighbor_num[0]}neighbor/cell_0/indexes/chrom_offset"]
+                    copyDataset(chrom_offset_ds, index_grp, "chrom_offset")
                     # Open track files outside the inner loops to minimize the number of open calls
                     track_files = {}
                     for track_type, track_f_name in res_tracks["track_object"].items():
@@ -491,9 +497,8 @@ class SCHiCGenerator:
                             del tracks_grp[track_type]
                         track_grp = tracks_grp.create_group(track_type)
                         for cell_id in range(self.cell_cnt):
-                            tgt_grp = track_grp.create_group(f"cell_{cell_id}")
                             source_grp = f[f"insulation/cell_{cell_id}"]
-                            write_track(source_grp, tgt_grp, track_type)
+                            write_track(source_grp, track_grp, f"cell_{cell_id}")
                     for f in track_files.values():
                         f.close()
         else:
