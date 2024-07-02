@@ -72,11 +72,11 @@ OFFSET_DTYPE = np.int64
     │         │   ├── cell_1
     │         │   └── cell_2
     │         ├── tracks
-    |         │    └── insulation
-    │         │       ├── cell_0
-    │         │       ├── cell_1
-    │         │       ├── group_0
-    │         │       └── group_1
+    │         │    ├── indexes
+    │         │    │    ├── chrom_offset
+    |         │    └── insul_score
+    │         │         ├── cell_0
+    │         │         └── cell_1
     │   
     ├── 50000
 
