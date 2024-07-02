@@ -12,13 +12,16 @@
             }
         }
     ],
-    "neighbor_num": 5,
+    "neighbor_num": [
+        0,
+        5
+    ],
     "embedding_name": "exp1",
     "chrom_size_file_name": "Annotation/hg19.chrom.sizes.txt",
     "cytoband_file_name": "Annotation/cytoBand_hg19.txt",
     "below_is_for_cellScope": "",
     "data_folder": "/work/magroup/yunshuoc/Higashi_Pipeline/Lee_et_al",
-    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Lee_et_al_all.h5",
+    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Lee_et_al_test2.h5",
     "cell_cnt": 4238,
     "_cell_cnt": 4238,
     "process_cnt": 25,

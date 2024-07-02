@@ -1,17 +1,20 @@
 {
     "data_folder": "/work/magroup/yunshuoc/Higashi_Pipeline/Ramani_et_al",
-    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Ramani_et_al_all.h5",
+    "output_path": "/work/magroup/yunshuoc/scHDF5_data/Ramani_et_al_test1.h5",
     "contact_map_path": "temp",
     "raw_map_path": "temp/raw",
     "embed_file_name": "temp/embed/exp1_0_origin.npy",
     "meta_file_name": "label_info.pickle",
     "embed_label": "cell type",
-    "neighbor_num": 5,
+    "neighbor_num": [
+        0,
+        5
+    ],
     "embedding_name": "exp1",
     "chrom_size_file_name": "Annotation/hg19.chrom.sizes.txt",
     "cytoband_file_name": "Annotation/cytoBand_hg19.txt",
-    "cell_cnt": 620,
-    "process_cnt": 10,
+    "cell_cnt": 16,
+    "process_cnt": 8,
     "_cell_cnt": 620,
     "resolutions": [
         500000
