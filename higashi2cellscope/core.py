@@ -22,7 +22,7 @@ OFFSET_DTYPE = np.int64
 
 """
 ├── meta
-│    ├── label
+│    ├── label group_0 -> cell type 0
 ├── embed
 │    ├── pca
 │    └── umap
@@ -47,8 +47,9 @@ OFFSET_DTYPE = np.int64
     │         │   │       └── bin1_offset
     │         │   ├── cell_1
     │         │   ├── cell_2
-    │         │   ├── group_0
-    │         │   └── group_1
+    │         │   ├── group
+    │         │   │   ├── group_0
+    │         │   │   └── group_1
     │         ├── imputed_0neighbor
     │         │   ├── cell_0
     │         │   │   ├── pixels
@@ -217,8 +218,8 @@ def write_embed(grp, embed, h5_opts):
     grp.create_dataset("umap", shape=(len(vec_umap),2), data= vec_umap, **h5_opts)
     #grp.create_dataset("label", shape=(len(label),), data= label, **h5_opts)
 
-def write_meta(grp, data, label_name, h5_opts):
-    cell_type = np.array(data[label_name])
+def write_meta(grp, cell_type_dict, h5_opts):
+    cell_type = np.array(cell_type_dict.keys())
     ascii_label = np.char.encode(cell_type, 'ascii')
     grp.create_dataset("label", shape=(len(ascii_label),), data= ascii_label, **h5_opts)
 
@@ -413,8 +414,8 @@ class SCHiCGenerator:
         
         cell_type_dict = get_celltype_dict(meta_file, self.embed_label)
         
-        def process_group(parent_group, cell_type, cells, neighbor_num, is_raw):
-            cur_celltype_grp = parent_group.create_group(cell_type)
+        def process_group(parent_group, idx, cells, neighbor_num, is_raw):
+            cur_celltype_grp = parent_group.create_group(f"group_{idx}")
             cell_celltype_pixels = cur_celltype_grp.create_group("pixels")
             setup_pixels(cell_celltype_pixels, n_bins, self.h5_opts)
             write_group_pixels(
@@ -427,15 +428,18 @@ class SCHiCGenerator:
             raw_grp_index = cur_celltype_grp.create_group("indexes")
             write_index(raw_grp_index, chrom_offset, raw_bin_offset, self.h5_opts)
 
+        idx = 0
         for cell_type, cells in cell_type_dict.items():
-            raw_grp = layer_grp["raw"]
+            raw_grp = layer_grp["raw"].create_group("group")
             print(f"processing raw group for type {cell_type}")
-            process_group(raw_grp, cell_type, cells, self.neighbor_num[0], True)
+            process_group(raw_grp, idx, cells, self.neighbor_num[0], True)
 
             for num in self.neighbor_num:
                 print(f"processing imputed_{num}neighbor group for type {cell_type}")
-                impute_grp = layer_grp[f"imputed_{num}neighbor"]
-                process_group(impute_grp, cell_type, cells, num, False)
+                impute_grp = layer_grp[f"imputed_{num}neighbor"].create_group("group")
+                process_group(impute_grp, idx, cells, num, False)
+            
+            idx += 1
 
     def append_h5(self, atype: str):
         if not os.path.exists(self.output_path):
@@ -458,14 +462,14 @@ class SCHiCGenerator:
             if fileType(meta_file) !="pkl":
                 raise FileNotFoundError(f"The file '{meta_file}' is not a pickle file.")
             
-            label_info = pickle.load(open(meta_file, "rb"))
+            cell_type_dict = get_celltype_dict(meta_file, self.embed_label)
             with h5py.File(self.output_path, 'a') as hdf:
                 if 'meta' in hdf:
                     # Delete the group 'rgrp'
                     del hdf['meta']
-
+                
                 meta_grp = hdf.create_group('meta')
-                write_meta(meta_grp, label_info, self.embed_label, self.h5_opts)
+                write_meta(meta_grp, cell_type_dict, self.h5_opts)
         elif(atype=='1dtrack'):
             print("appending 1d track data...")
             for res_tracks in self.tracks:
