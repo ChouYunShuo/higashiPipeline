@@ -428,18 +428,18 @@ class SCHiCGenerator:
             raw_grp_index = cur_celltype_grp.create_group("indexes")
             write_index(raw_grp_index, chrom_offset, raw_bin_offset, self.h5_opts)
 
-        idx = 0
-        for cell_type, cells in cell_type_dict.items():
-            raw_grp = layer_grp["raw"].create_group("group")
+        raw_grp = layer_grp["raw"].create_group("group")
+        for idx, (cell_type, cells) in enumerate(cell_type_dict.items()):
             print(f"processing raw group for type {cell_type}")
             process_group(raw_grp, idx, cells, self.neighbor_num[0], True)
 
-            for num in self.neighbor_num:
+        for num in self.neighbor_num:
+            impute_grp = layer_grp[f"imputed_{num}neighbor"].create_group("group")
+            for idx, (cell_type, cells) in enumerate(cell_type_dict.items()):
                 print(f"processing imputed_{num}neighbor group for type {cell_type}")
-                impute_grp = layer_grp[f"imputed_{num}neighbor"].create_group("group")
                 process_group(impute_grp, idx, cells, num, False)
             
-            idx += 1
+            
 
     def append_h5(self, atype: str):
         if not os.path.exists(self.output_path):
