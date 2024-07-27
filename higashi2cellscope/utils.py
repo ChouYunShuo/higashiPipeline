@@ -223,6 +223,9 @@ def print_hdf5_structure(file_path):
                         cell0_obj = obj[cell0_path]
                         print_attrs(cell0_path, cell0_obj, depth + 1)
                     print_attrs(first_child_path, first_child_obj, depth + 1)
+                # if "group" in obj.keys():
+                #     grp_path = f"{name}/group"
+                #     print_attrs(grp_path, obj["group"], depth + 1)
             else:
                 for key in obj.keys():
                     print_attrs(f"{name}/{key}", obj[key], depth + 1)
