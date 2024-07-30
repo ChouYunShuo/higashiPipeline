@@ -219,7 +219,7 @@ def write_embed(grp, embed, h5_opts):
     #grp.create_dataset("label", shape=(len(label),), data= label, **h5_opts)
 
 def write_meta(grp, cell_type_dict, h5_opts):
-    cell_type = np.array(cell_type_dict.keys())
+    cell_type = np.array(list(cell_type_dict.keys()))
     ascii_label = np.char.encode(cell_type, 'ascii')
     grp.create_dataset("label", shape=(len(ascii_label),), data= ascii_label, **h5_opts)
 
